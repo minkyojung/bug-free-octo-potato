@@ -15,6 +15,8 @@
 ## 실행
 ```bash
 .venv/bin/python -m src.baseline   # 베이스라인: 자체 채점 + 제출 파일 생성
+.venv/bin/python -m src.experiments Target_1   # 피처 사다리 (Target_2도 동일)
+.venv/bin/python -m src.experiments final      # 선택된 피처로 최종 채점 + 제출 파일
 .venv/bin/python -m pytest -q      # 테스트
 (cd notebooks && ../.venv/bin/jupyter nbconvert --to notebook --execute --inplace 01_eda.ipynb)  # EDA 재실행
 ```
@@ -31,5 +33,9 @@
 | `src/baseline.py` | 강사 베이스라인 재구현 (노트북 점수를 그대로 재현) |
 | `src/eda.py` | 단변량 AUC, 요일 내 AUC, 우연 기준선(순환 이동) |
 | `src/plotting.py` | 보고서용 그림 스타일 (한글 폰트, 색상) |
+| `src/features.py` | 과거 방향 파생변수 묶음 (미국 지수 변화, 트래픽, 요일 대비 이상도 등) |
+| `src/models.py` | 측정 모델(로지스틱, LightGBM)과 순위 평균 |
+| `src/experiments.py` | 피처 사다리 실험과 최종 채점·제출 |
 | `notebooks/01_eda.ipynb` | 데이터 이해 (EDA). 그림은 `outputs/figures/` |
-| `tests/` | 분할 누수 방지, 제출 형식, 베이스라인 재현 테스트 |
+| `tests/` | 분할·피처 누수 방지, 제출 형식, 베이스라인 재현, 통계 함수 테스트 |
+| `docs/EXPERIMENTS.md` | 실험 일지 |

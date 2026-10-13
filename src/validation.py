@@ -11,8 +11,6 @@ import pandas as pd
 from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import TimeSeriesSplit
 
-from src.data import TARGETS
-
 N_SPLITS = 5
 FOLD_SIZE = 100  # Public 평가 기간과 같은 길이
 GAP = 3
@@ -36,9 +34,9 @@ def holdout_split(n: int) -> list[Split]:
 
 
 def evaluate(fit_predict: FitPredict, X: pd.DataFrame, y: pd.DataFrame, splits: list[Split]) -> pd.DataFrame:
-    """타깃 × fold별 AUC 표를 반환한다. X, y는 시간 오름차순이어야 한다."""
+    """타깃(y의 각 열) × fold별 AUC 표를 반환한다. X, y는 시간 오름차순이어야 한다."""
     rows = []
-    for target in TARGETS:
+    for target in y.columns:
         for fold, (tr, va) in enumerate(splits, start=1):
             pred = np.asarray(fit_predict(X.iloc[tr], y[target].iloc[tr], X.iloc[va]), dtype=float)
             if pred.shape != (len(va),) or not np.isfinite(pred).all():
