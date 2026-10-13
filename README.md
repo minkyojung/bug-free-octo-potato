@@ -16,6 +16,7 @@
 ```bash
 .venv/bin/python -m src.baseline   # 베이스라인: 자체 채점 + 제출 파일 생성
 .venv/bin/python -m pytest -q      # 테스트
+(cd notebooks && ../.venv/bin/jupyter nbconvert --to notebook --execute --inplace 01_eda.ipynb)  # EDA 재실행
 ```
 - 채점 결과: `outputs/experiments/<run>_cv5.csv`, `<run>_holdout200.csv`
 - 제출 파일: `outputs/submissions/<run>/public_<반_이름>_<회차>.csv`, `private_<반_이름>.csv`
@@ -28,4 +29,7 @@
 | `src/validation.py` | 자체 채점기: 시계열 5-fold(100일씩, gap 3일) + 마지막 200일 holdout |
 | `src/submission.py` | 제출 파일 생성과 형식 검사 |
 | `src/baseline.py` | 강사 베이스라인 재구현 (노트북 점수를 그대로 재현) |
+| `src/eda.py` | 단변량 AUC, 요일 내 AUC, 우연 기준선(순환 이동) |
+| `src/plotting.py` | 보고서용 그림 스타일 (한글 폰트, 색상) |
+| `notebooks/01_eda.ipynb` | 데이터 이해 (EDA). 그림은 `outputs/figures/` |
 | `tests/` | 분할 누수 방지, 제출 형식, 베이스라인 재현 테스트 |
