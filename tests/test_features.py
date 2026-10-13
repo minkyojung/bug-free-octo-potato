@@ -3,7 +3,18 @@ import pandas as pd
 import pytest
 
 from src.data import N_TRAIN, feature_columns
-from src.features import FAMILIES, build, build_from_full, trading_change, trading_days
+from src.features import (
+    FAMILIES,
+    FOOD_WDDEV_COLUMNS,
+    GENERAL_TRAFFIC_COLUMNS,
+    US_CHANGE_COLUMNS,
+    US_CORE_COLUMNS,
+    US_VOLNORM_COLUMNS,
+    build,
+    build_from_full,
+    trading_change,
+    trading_days,
+)
 
 
 @pytest.fixture(scope="module")
@@ -83,3 +94,46 @@ def test_us_core_is_subset_of_full_us_features(data):
     core, _ = build(train, test, ["us_core"])
     full, _ = build(train, test, ["us_change", "us_trend_vol"])
     pd.testing.assert_frame_equal(core, full[core.columns])
+
+
+def test_weekday_profile_uses_matching_weekdays():
+    # 요일별로 다른 상수값(요일 패턴)만 있는 시계열 -> 결과는 정확히 "D+3 요일 값 - D 요일 값"
+    days = np.arange(70)
+    pattern = np.array([5.0, 1, 1, 1, 2, 8, 9])  # 요일 위치 0..6의 값
+    df = pd.DataFrame({"Weekday": days % 7 + 1, "SH1_쇼핑1_식품": pattern[days % 7]})
+    df["SH2_쇼핑2_식품_a"] = df["SH1_쇼핑1_식품"]
+    out = FAMILIES["weekday_profile"](df)
+    t = 40
+    expected = pattern[(t + 3) % 7] - pattern[t % 7]
+    assert out.loc[t, "SH1_쇼핑1_식품_wdprof"] == pytest.approx(expected)
+    assert out.iloc[:28].isna().all().all()  # 4주치가 모이기 전에는 계산하지 않음
+
+
+def test_monotone_target_columns_exist(data):
+    """단조 제약 대상 이름이 실제 피처 이름과 어긋나면 제약이 조용히 0이 되므로 이름을 고정 확인한다."""
+    train, test = data
+    X_change, _ = build(train, test, ["us_change"])
+    assert list(X_change.columns) == US_CHANGE_COLUMNS
+    X_core, _ = build(train, test, ["us_core"])
+    assert list(X_core.columns) == US_CORE_COLUMNS
+
+
+def test_screening_target_columns_exist(data):
+    """G2·G3·G4가 겨냥하는 컬럼 이름이 실제 피처 이름과 일치해야 한다 (어긋나면 조용히 무효가 됨)."""
+    train, test = data
+    X2, _ = build(train, test, ["weekday", "traffic", "weekday_dev"])
+    assert set(FOOD_WDDEV_COLUMNS) <= set(X2.columns)
+    assert set(GENERAL_TRAFFIC_COLUMNS) <= set(X2.columns) and len(GENERAL_TRAFFIC_COLUMNS) == 12
+    X1, _ = build(train, test, ["us_volnorm"])
+    assert list(X1.columns) == US_VOLNORM_COLUMNS
+
+
+def test_food_decomposition_recovers_pure_weekly_pattern():
+    # 요일 패턴만 있는 시계열이면 주기 분해 예측 = 정확히 F[t+3] - F[t]
+    days = np.arange(80)
+    pattern = np.array([5.0, 1, 1, 1, 2, 8, 9])
+    df = pd.DataFrame({"SH1_쇼핑1_식품": pattern[days % 7] + 0.0})
+    out = FAMILIES["food_l1"](df)
+    t = 50
+    assert out.loc[t, "F_decomp_chg3"] == pytest.approx(pattern[(t + 3) % 7] - pattern[t % 7])
+    assert out.loc[t, "F_lag7_minus_now"] == pytest.approx(0.0)

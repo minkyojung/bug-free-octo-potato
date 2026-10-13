@@ -31,6 +31,12 @@ def cv_splits_fine(n: int) -> list[Split]:
     return list(TimeSeriesSplit(n_splits=10, test_size=50, gap=GAP).split(np.arange(n)))
 
 
+def private_mimic_splits(n: int) -> list[Split]:
+    """Private 흉내 4개 창: 200일씩, 100일 간격, 마지막 창 = holdout200. 창 시작 GAP일 전까지 학습."""
+    starts = range(n - HOLDOUT_SIZE - 300, n - HOLDOUT_SIZE + 1, 100)
+    return [(np.arange(0, s - GAP), np.arange(s, s + HOLDOUT_SIZE)) for s in starts]
+
+
 def holdout_split(n: int) -> list[Split]:
     """마지막 200일 검증 (Private 길이 모사)."""
     valid = np.arange(n - HOLDOUT_SIZE, n)

@@ -16,7 +16,9 @@
 ```bash
 .venv/bin/python -m src.baseline   # 베이스라인: 자체 채점 + 제출 파일 생성
 .venv/bin/python -m src.experiments Target_1   # 피처 사다리 (Target_2도 동일)
-.venv/bin/python -m src.experiments final      # 선택된 피처로 최종 채점 + 제출 파일 (현재 최종 제출 경로)
+.venv/bin/python -m src.experiments final      # features_v1 채점 + 제출 파일
+.venv/bin/python -m src.backlog Target_1        # 후보 백로그 실행 (Target_2도 동일)
+.venv/bin/python -m src.backlog final           # features_v2 채점 + 제출 파일 (현재 최종 제출 경로)
 .venv/bin/python -m src.modeling Target_1      # 모델 비교·조정·앙상블 (Target_2도 동일)
 .venv/bin/python -m src.hypotheses Target_1    # 사전 등록 가설 검증 (Target_2도 동일)
 .venv/bin/python -m pytest -q      # 테스트
@@ -41,6 +43,7 @@
 | `src/modeling.py` | 모델 비교·조정·앙상블 실험 (덩어리 4) |
 | `src/hypotheses.py` | 사전 등록 가설 사다리 (덩어리 4.5) |
 | `src/augment.py`, `src/levers.py` | 형제 정답 증강·최근 구간 학습 실험 (덩어리 4.6) |
+| `src/backlog.py` | 사전 등록 후보 실행과 최종 v2 채점·제출 (덩어리 4.7) |
 | `notebooks/01_eda.ipynb` | 데이터 이해 (EDA). 그림은 `outputs/figures/` |
 | `tests/` | 분할·피처 누수 방지, 제출 형식, 베이스라인 재현, 통계 함수 테스트 |
 | `docs/EXPERIMENTS.md` | 실험 일지 |

@@ -2,12 +2,24 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.validation import FOLD_SIZE, GAP, HOLDOUT_SIZE, N_SPLITS, beats, cv_splits, cv_splits_fine, evaluate, holdout_split, summarize
+from src.validation import (
+    FOLD_SIZE,
+    GAP,
+    HOLDOUT_SIZE,
+    N_SPLITS,
+    beats,
+    cv_splits,
+    cv_splits_fine,
+    evaluate,
+    holdout_split,
+    private_mimic_splits,
+    summarize,
+)
 
 N = 924
 
 
-@pytest.mark.parametrize("splits", [cv_splits(N), cv_splits_fine(N), holdout_split(N)])
+@pytest.mark.parametrize("splits", [cv_splits(N), cv_splits_fine(N), private_mimic_splits(N), holdout_split(N)])
 def test_splits_keep_time_order_and_gap(splits):
     for tr, va in splits:
         assert tr[0] == 0 and np.array_equal(tr, np.arange(tr[0], tr[-1] + 1))  # 처음부터 연속
@@ -66,3 +78,31 @@ def test_fine_cv_covers_same_period_as_cv5():
     fine, coarse = cv_splits_fine(N), cv_splits(N)
     assert len(fine) == 10 and all(len(va) == 50 for _, va in fine)
     assert fine[0][1][0] == coarse[0][1][0] and fine[-1][1][-1] == coarse[-1][1][-1]
+
+
+def test_private_mimic_layout():
+    splits = private_mimic_splits(N)
+    assert [va[0] + 1 for _, va in splits] == [425, 525, 625, 725]  # Time_step 기준 시작일
+    assert all(len(va) == HOLDOUT_SIZE for _, va in splits)
+    last_tr, last_va = splits[-1]
+    (ho_tr, ho_va), = holdout_split(N)
+    assert np.array_equal(last_tr, ho_tr) and np.array_equal(last_va, ho_va)  # 마지막 창 = holdout200
+
+
+def test_backlog_decision_rules():
+    """사전 등록 규칙(#10)이 코드와 일치하는지: B는 세 조건 모두, A는 A 시작점 대비 −0.002 이내."""
+    from src.backlog import Scores, decide
+
+    base = Scores(cv=np.full(5, 0.60), pm=np.full(4, 0.60), regime=0.01, monthu=0.68)
+    up = Scores(cv=np.array([0.62, 0.62, 0.62, 0.62, 0.59]), pm=np.full(4, 0.61), regime=0.02, monthu=0.69)
+    assert decide("B", up, base, base, "regime")[0]
+    assert not decide("B", Scores(up.cv, up.pm, regime=0.0, monthu=0.69), base, base, "regime")[0]  # 메커니즘 실패
+    assert not decide("B", Scores(up.cv, np.full(4, 0.59), 0.02, 0.69), base, base, "regime")[0]  # pm4 하락
+    slight_drop = Scores(cv=np.full(5, 0.5985), pm=np.full(4, 0.5985), regime=0.0, monthu=0.0)
+    assert decide("A", slight_drop, base, base, None)[0]  # −0.0015: 허용
+    big_drop = Scores(cv=np.full(5, 0.597), pm=np.full(4, 0.60), regime=0.0, monthu=0.0)
+    assert not decide("A", big_drop, base, base, None)[0]  # −0.003: 거부
+    # A는 직전 단계(current)가 아니라 A 시작 직전 상태(a_base)와 비교한다
+    cur, new = (Scores(np.full(5, v), np.full(4, v), 0.0, 0.0) for v in (0.63, 0.62))
+    assert decide("A", new, cur, base, None)[0]  # a_base=0.60 기준: 통과
+    assert not decide("A", new, base, cur, None)[0]  # a_base=0.63 기준: 거부

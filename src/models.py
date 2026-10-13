@@ -60,22 +60,28 @@ def _positional(X: pd.DataFrame) -> pd.DataFrame:
     return X.set_axis([f"f{i}" for i in range(X.shape[1])], axis=1)
 
 
-def make_logistic(C: float = LOGISTIC_C) -> FitPredict:
+def make_logistic(C: float = LOGISTIC_C, clip: bool = False) -> FitPredict:
+    """clip=True면 예측할 입력을 학습 데이터의 최소~최대로 자른다 (범위 밖 선형 외삽 방지)."""
+
     def fit_predict(X_train: pd.DataFrame, y_train: pd.Series, X_pred: pd.DataFrame, sample_weight=None) -> np.ndarray:
         keep = _non_constant(X_train)
         model = make_pipeline(SimpleImputer(strategy="median"), StandardScaler(), LogisticRegression(C=C, max_iter=5000))
         model.fit(X_train[keep], y_train, logisticregression__sample_weight=sample_weight)
-        return model.predict_proba(X_pred[keep])[:, 1]
+        X_in = X_pred[keep]
+        if clip:
+            X_in = X_in.clip(lower=X_train[keep].min(), upper=X_train[keep].max(), axis=1)
+        return model.predict_proba(X_in)[:, 1]
 
     return fit_predict
 
 
-def _tree(build_model: Callable[[], object], impute: bool) -> FitPredict:
-    """트리 모델 공통 래퍼. impute=False면 결측을 모델이 직접 처리한다 (LightGBM, XGBoost)."""
+def _tree(build_model: Callable[[pd.Index], object], impute: bool) -> FitPredict:
+    """트리 모델 공통 래퍼. build_model은 실제로 쓰는 컬럼을 받는다.
+    impute=False면 결측을 모델이 직접 처리한다 (LightGBM, XGBoost)."""
 
     def fit_predict(X_train: pd.DataFrame, y_train: pd.Series, X_pred: pd.DataFrame, sample_weight=None) -> np.ndarray:
         keep = _non_constant(X_train)
-        model = build_model()
+        model = build_model(keep)
         fit_kwargs = {"sample_weight": sample_weight}
         if impute:
             model = make_pipeline(SimpleImputer(strategy="median"), model)
@@ -86,24 +92,73 @@ def _tree(build_model: Callable[[], object], impute: bool) -> FitPredict:
     return fit_predict
 
 
-def make_lgbm(**overrides) -> FitPredict:
+def make_lgbm(monotone_increasing: tuple[str, ...] = (), monotone_decreasing: tuple[str, ...] = (), **overrides) -> FitPredict:
+    """단조 제약: increasing 컬럼은 값이 커지면 예측이 줄지 않고, decreasing 컬럼은 늘지 않는다."""
     params = LGBM_PARAMS | overrides
-    return _tree(lambda: LGBMClassifier(**params), impute=False)
+    if set(monotone_increasing) & set(monotone_decreasing):
+        raise ValueError("같은 컬럼에 증가·감소 제약을 동시에 걸 수 없습니다.")
+
+    def build(columns: pd.Index) -> LGBMClassifier:
+        if not monotone_increasing and not monotone_decreasing:
+            return LGBMClassifier(**params)
+        constraints = [int(c in monotone_increasing) - int(c in monotone_decreasing) for c in columns]
+        return LGBMClassifier(**params, monotone_constraints=constraints)
+
+    return _tree(build, impute=False)
+
+
+def make_pairwise_logistic(C: float = LOGISTIC_C, clip: bool = False) -> FitPredict:
+    """쌍 비교 로지스틱: (양성 − 음성) 입력 차이로 '어느 날이 더 오를까'를 학습한다 (AUC의 표준 대리 손실).
+
+    정규화 강도는 일반 로지스틱과 같도록 C에 (표본 수 / 쌍 수)를 곱한다.
+    sample_weight가 있으면 쌍의 가중치는 두 날 가중치의 곱이다.
+    """
+
+    def fit_predict(X_train: pd.DataFrame, y_train: pd.Series, X_pred: pd.DataFrame, sample_weight=None) -> np.ndarray:
+        keep = _non_constant(X_train)
+        prep = make_pipeline(SimpleImputer(strategy="median"), StandardScaler()).fit(X_train[keep])
+        Z = prep.transform(X_train[keep])
+        y = np.asarray(y_train)
+        pos, neg = Z[y == 1], Z[y == 0]
+        diffs = (pos[:, None, :] - neg[None, :, :]).reshape(-1, Z.shape[1])
+        X_pairs = np.vstack([diffs, -diffs])
+        y_pairs = np.r_[np.ones(len(diffs)), np.zeros(len(diffs))]
+        w_pairs = None
+        if sample_weight is not None:
+            w = np.asarray(sample_weight, dtype=float)
+            w_pairs = np.tile(np.outer(w[y == 1], w[y == 0]).ravel(), 2)
+        C_pair = C * len(Z) / len(X_pairs)
+        model = LogisticRegression(C=C_pair, fit_intercept=False, max_iter=5000).fit(X_pairs, y_pairs, sample_weight=w_pairs)
+        X_in = X_pred[keep]
+        if clip:
+            X_in = X_in.clip(lower=X_train[keep].min(), upper=X_train[keep].max(), axis=1)
+        return 1 / (1 + np.exp(-(prep.transform(X_in) @ model.coef_[0])))
+
+    return fit_predict
 
 
 def make_xgb(**overrides) -> FitPredict:
     params = XGB_PARAMS | overrides
-    return _tree(lambda: XGBClassifier(**params), impute=False)
+    return _tree(lambda columns: XGBClassifier(**params), impute=False)
 
 
 def make_rf(**overrides) -> FitPredict:
     params = FOREST_PARAMS | overrides
-    return _tree(lambda: RandomForestClassifier(**params), impute=True)
+    return _tree(lambda columns: RandomForestClassifier(**params), impute=True)
 
 
 def make_et(**overrides) -> FitPredict:
     params = FOREST_PARAMS | overrides
-    return _tree(lambda: ExtraTreesClassifier(**params), impute=True)
+    return _tree(lambda columns: ExtraTreesClassifier(**params), impute=True)
+
+
+def on_columns(columns: list[str], fit_predict: FitPredict) -> FitPredict:
+    """지정한 컬럼만 쓰는 모델로 감싼다 (피처셋 앙상블용)."""
+
+    def wrapped(X_train: pd.DataFrame, y_train: pd.Series, X_pred: pd.DataFrame) -> np.ndarray:
+        return fit_predict(X_train[columns], y_train, X_pred[columns])
+
+    return wrapped
 
 
 # 모델 이름 -> 설정을 받아 FitPredict를 만드는 함수

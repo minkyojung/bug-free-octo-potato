@@ -146,19 +146,13 @@ def us_weekday(df: pd.DataFrame) -> pd.DataFrame:
     return weekday(df).mul(change, axis=0).add_prefix("US_tchg1_x_")
 
 
+US_CHANGE_COLUMNS = [f"{c}_tchg{k}" for c in US_INDICES for k in (1, 3)]  # us_change의 출력 컬럼
+US_CORE_COLUMNS = ["FI_Sp500_tchg1", "FI_Sp500_tchg3", "US_tchg20", "US_vol20", "US_drawdown20"]
+
+
 def us_core(df: pd.DataFrame) -> pd.DataFrame:
     """us_change + us_trend_vol의 축소판 (S&P 1·3일 변화, 20일 추세·변동성·고점 대비)."""
-    traded = trading_days(df, US_INDICES)
-    trend = us_trend_vol(df)
-    return pd.DataFrame(
-        {
-            "FI_Sp500_tchg1": trading_change(df["FI_Sp500"], 1, traded),
-            "FI_Sp500_tchg3": trading_change(df["FI_Sp500"], 3, traded),
-            "US_tchg20": trend["US_tchg20"],
-            "US_vol20": trend["US_vol20"],
-            "US_drawdown20": trend["US_drawdown20"],
-        }
-    )
+    return pd.concat([us_change(df), us_trend_vol(df)], axis=1)[US_CORE_COLUMNS]
 
 
 def kr_holiday(df: pd.DataFrame) -> pd.DataFrame:
@@ -179,11 +173,73 @@ def monthu_interact(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(out)
 
 
+# ---- 덩어리 4.7 후보 묶음 (docs/EXPERIMENTS.md #10) ----------------------------------------
+
+
+def us_momentum60(df: pd.DataFrame) -> pd.DataFrame:
+    """B2: 미국 지수 평균의 60거래일 변화 (시기별 기저율을 잡는다는 가설)."""
+    level = _us_level(df)
+    return pd.DataFrame({"US_tchg60": trading_change(level, 60, trading_days(df, US_INDICES))})
+
+
+def weekday_profile(df: pd.DataFrame, weeks: int = 4) -> pd.DataFrame:
+    """B1: 최근 요일 패턴. 지난 weeks주 동안 'D+3과 같은 요일 평균 - D와 같은 요일 평균'.
+
+    t+3-7w (w>=1)은 t-4 이하라 과거 값만 쓴다. 요일 패턴이 시기마다 바뀌면 이 값이 따라 바뀐다.
+    """
+    proxies = {"SH2_식품_med": _group(df, "SH2_쇼핑2_식품").median(axis=1), "SH1_쇼핑1_식품": df["SH1_쇼핑1_식품"]}
+    out = {}
+    for name, p in proxies.items():
+        target_day = pd.concat([p.shift(7 * w - 3) for w in range(1, weeks + 1)], axis=1).mean(axis=1, skipna=False)
+        today = pd.concat([p.shift(7 * w) for w in range(1, weeks + 1)], axis=1).mean(axis=1, skipna=False)
+        out[f"{name}_wdprof"] = target_day - today
+    return pd.DataFrame(out)
+
+
+# ---- 덩어리 4.8 후보 묶음 (docs/EXPERIMENTS.md #13) ----------------------------------------
+
+FOOD_L1 = "SH1_쇼핑1_식품"
+FOOD_WDDEV_COLUMNS = ["SH1_쇼핑1_식품_wddev", "SH2_식품_med_wddev"]  # G3 평균 회귀 제약 대상 (weekday_dev 출력)
+GENERAL_TRAFFIC_COLUMNS = [f"{p}_med_chg{k}" for p in TRAFFIC_GROUPS for k in (1, 3, 7)] + [
+    f"{p}_med_wddev" for p in TRAFFIC_GROUPS
+]  # G2에서 빼는 일반 트래픽 입력 (traffic 9개 + weekday_dev 중 3개)
+US_VOLNORM_COLUMNS = [f"{c}_tchg{k}_vn" for c in US_INDICES for k in (1, 3)]
+
+
+def food_l1(df: pd.DataFrame) -> pd.DataFrame:
+    """G1: 식품 L1(F)의 최근 2주 궤적 + 주기 분해 예측.
+
+    Target_2는 사실상 'F가 3일 뒤 오를까'다 (#12 전제 확인 1). 주기 분해 예측은
+    'F[t+3] ≈ 최근 7일 평균 + D+3 요일의 주간 편차(지난 4주 평균)'에서 오늘 값을 뺀 값이다.
+    주간 편차는 t+3-7w (w>=1), 즉 t-4 이하 날짜의 것만 쓴다.
+    """
+    f = df[FOOD_L1]
+    out = {f"F_lag{k}_minus_now": f.shift(k) - f for k in range(1, 15)}
+    level = f.rolling(7).mean()
+    weekly_dev = f - level
+    season_target = pd.concat([weekly_dev.shift(7 * w - 3) for w in range(1, 5)], axis=1).mean(axis=1, skipna=False)
+    out["F_decomp_chg3"] = level + season_target - f
+    return pd.DataFrame(out)
+
+
+def us_volnorm(df: pd.DataFrame) -> pd.DataFrame:
+    """G4: 미국 지수 1·3거래일 변화 ÷ 최근 20거래일 변동성 (같은 변화도 잔잔한 시기엔 더 큰 신호)."""
+    traded = trading_days(df, US_INDICES)
+    out = {}
+    for c in US_INDICES:
+        s = df[c][traded]
+        vol = s.diff().rolling(20).std()
+        vol = vol.where(vol > 0)
+        for k in (1, 3):
+            out[f"{c}_tchg{k}_vn"] = (s.diff(k) / vol).reindex(df.index).ffill()
+    return pd.DataFrame(out)
+
+
 FAMILIES: dict[str, Callable[[pd.DataFrame], pd.DataFrame]] = {
     f.__name__: f
     for f in (
         raw, weekday, us_change, us_composite, us_trend_vol, macro_change, traffic, weekday_dev, food_health,
-        us_weekday, us_core, kr_holiday, monthu_interact,
+        us_weekday, us_core, kr_holiday, monthu_interact, us_momentum60, weekday_profile, food_l1, us_volnorm,
     )
 }  # fmt: skip
 
