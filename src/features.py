@@ -137,10 +137,55 @@ def food_health(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame({f"{c}_chg{k}": df[c].diff(k) for c in cols for k in (1, 3, 7)})
 
 
+# ---- 덩어리 4.5 가설 묶음 (docs/EXPERIMENTS.md #7) ----------------------------------------
+
+
+def us_weekday(df: pd.DataFrame) -> pd.DataFrame:
+    """미국 지수 평균의 1거래일 변화 × 요일 (요일마다 정답 기간에 반영되는 정도가 다름)."""
+    change = trading_change(_us_level(df), 1, trading_days(df, US_INDICES))
+    return weekday(df).mul(change, axis=0).add_prefix("US_tchg1_x_")
+
+
+def us_core(df: pd.DataFrame) -> pd.DataFrame:
+    """us_change + us_trend_vol의 축소판 (S&P 1·3일 변화, 20일 추세·변동성·고점 대비)."""
+    traded = trading_days(df, US_INDICES)
+    trend = us_trend_vol(df)
+    return pd.DataFrame(
+        {
+            "FI_Sp500_tchg1": trading_change(df["FI_Sp500"], 1, traded),
+            "FI_Sp500_tchg3": trading_change(df["FI_Sp500"], 3, traded),
+            "US_tchg20": trend["US_tchg20"],
+            "US_vol20": trend["US_vol20"],
+            "US_drawdown20": trend["US_drawdown20"],
+        }
+    )
+
+
+def kr_holiday(df: pd.DataFrame) -> pd.DataFrame:
+    """한국 휴장일 추론: 평일(월~금)인데 원화 환율 3종이 모두 정지한 날. 오늘과 어제만 본다 (과거 방향)."""
+    weekday_row = df["Weekday"].between(2, 6)
+    holiday = (weekday_row & ~trading_days(df, MARKET_GROUPS["FX"])).astype(float)
+    return pd.DataFrame({"kr_holiday": holiday, "kr_holiday_prev": holiday.shift(1)})
+
+
+def monthu_interact(df: pd.DataFrame) -> pd.DataFrame:
+    """월·목요일 표시 × 트래픽 지표 3개 (틀리는 날이 월·목에 몰려 있음)."""
+    signals = traffic(df)[["KE_med_chg3", "SH1_med_chg1"]].join(weekday_dev(df)[["SH2_med_wddev"]])
+    out = {}
+    for day, name in [(2, "mon"), (5, "thu")]:
+        flag = (df["Weekday"] == day).astype(float)
+        for col in signals:
+            out[f"{name}_x_{col}"] = signals[col] * flag
+    return pd.DataFrame(out)
+
+
 FAMILIES: dict[str, Callable[[pd.DataFrame], pd.DataFrame]] = {
     f.__name__: f
-    for f in (raw, weekday, us_change, us_composite, us_trend_vol, macro_change, traffic, weekday_dev, food_health)
-}
+    for f in (
+        raw, weekday, us_change, us_composite, us_trend_vol, macro_change, traffic, weekday_dev, food_health,
+        us_weekday, us_core, kr_holiday, monthu_interact,
+    )
+}  # fmt: skip
 
 
 def build_from_full(full: pd.DataFrame, families: list[str]) -> pd.DataFrame:

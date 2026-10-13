@@ -53,7 +53,8 @@ def test_build_rejects_missing_values(data):
 
 def test_build_splits_rows_and_keeps_columns(data):
     train, test = data
-    X_train, X_test = build(train, test, list(FAMILIES))
+    families = [f for f in FAMILIES if f != "us_core"]  # us_core는 us_change+us_trend_vol의 교체용 (같은 이름)
+    X_train, X_test = build(train, test, families)
     assert len(X_train) == len(train) and len(X_test) == len(test)
     assert list(X_train.columns) == list(X_test.columns)
     # test 첫 행도 train 마지막 행들을 이용해 정상 계산됨 (warm-up NaN 없음)
@@ -65,3 +66,20 @@ def test_weekday_onehot_has_all_days(data):
     X_train, _ = build(train, test, ["weekday"])
     assert list(X_train.columns) == [f"wd_{d}" for d in range(1, 8)]
     assert (X_train.sum(axis=1) == 1).all()
+
+
+def test_kr_holiday_marks_weekday_fx_freeze(data):
+    train, test = data
+    X_train, _ = build(train, test, ["kr_holiday"])
+    holiday = X_train["kr_holiday"]
+    assert holiday.isin([0, 1]).all()
+    assert (holiday[train["Weekday"].isin([1, 7])] == 0).all()  # 주말은 휴장일로 세지 않음
+    assert 5 <= holiday.sum() <= 60  # 2.5년치 한국 공휴일 수의 상식적 범위
+    assert (X_train["kr_holiday_prev"].iloc[1:].to_numpy() == holiday.iloc[:-1].to_numpy()).all()
+
+
+def test_us_core_is_subset_of_full_us_features(data):
+    train, test = data
+    core, _ = build(train, test, ["us_core"])
+    full, _ = build(train, test, ["us_change", "us_trend_vol"])
+    pd.testing.assert_frame_equal(core, full[core.columns])

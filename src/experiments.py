@@ -4,7 +4,7 @@
 사다리 순서와 채택 규칙은 결과를 보기 전에 정했다.
 
 채택 규칙: 두 측정 모델 AUC의 fold별 평균을 점수로 삼는다. 직전 채택 상태보다
-  (1) 5개 fold 평균이 오르고, (2) 5개 fold 중 MIN_FOLD_WINS개 이상에서 오르면 채택한다.
+  (1) 5개 fold 평균이 오르고, (2) 5개 fold 중 4개 이상에서 오르면 채택한다 (validation.beats).
   기각된 묶음은 이후 단계에 포함하지 않는다. 마지막 단계 raw는 "원래값을 더하는 게 나은가"의 검증이다.
 
 실행:
@@ -21,10 +21,9 @@ from src.data import ROOT, TARGETS, load_data
 from src.features import build
 from src.models import PROBES, probe_ensemble
 from src.submission import build_submission, write_submissions
-from src.validation import cv_splits, evaluate, holdout_split, summarize
+from src.validation import beats, cv_splits, evaluate, holdout_split, summarize
 
 EXPERIMENT_DIR = ROOT / "outputs" / "experiments"
-MIN_FOLD_WINS = 4
 REFERENCE = ["raw"]  # 베이스라인과 같은 입력
 LADDERS = {
     "Target_1": {"core": ["us_change"], "rungs": ["us_composite", "us_trend_vol", "macro_change", "raw"]},
@@ -79,8 +78,7 @@ def run_ladder(target: str) -> list[str]:
     for rung in ladder["rungs"]:
         candidate = current + [rung]
         scores = score_folds(train, test, target, candidate)
-        wins = int((scores["평균"] > best["평균"]).sum())
-        adopted = scores["평균"].mean() > best["평균"].mean() and wins >= MIN_FOLD_WINS
+        adopted = beats(scores["평균"], best["평균"])
         rows.append(_summary_row(f"+ {rung}", candidate, scores, best, "채택" if adopted else "기각"))
         details.append(scores.assign(단계=f"+ {rung}"))
         if adopted:

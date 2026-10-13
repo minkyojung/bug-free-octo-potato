@@ -2,12 +2,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.validation import FOLD_SIZE, GAP, HOLDOUT_SIZE, N_SPLITS, cv_splits, evaluate, holdout_split, summarize
+from src.validation import FOLD_SIZE, GAP, HOLDOUT_SIZE, N_SPLITS, beats, cv_splits, cv_splits_fine, evaluate, holdout_split, summarize
 
 N = 924
 
 
-@pytest.mark.parametrize("splits", [cv_splits(N), holdout_split(N)])
+@pytest.mark.parametrize("splits", [cv_splits(N), cv_splits_fine(N), holdout_split(N)])
 def test_splits_keep_time_order_and_gap(splits):
     for tr, va in splits:
         assert tr[0] == 0 and np.array_equal(tr, np.arange(tr[0], tr[-1] + 1))  # 처음부터 연속
@@ -47,3 +47,22 @@ def test_evaluate_rejects_bad_predictions():
     y = pd.DataFrame({"Target_1": np.arange(N) % 2, "Target_2": np.arange(N) % 2})
     with pytest.raises(ValueError):
         evaluate(lambda X_tr, y_tr, X_va: np.full(len(X_va), np.nan), X, y, cv_splits(N))
+
+
+@pytest.mark.parametrize(
+    "new, expected",
+    [
+        ([0.65, 0.65, 0.65, 0.65, 0.55], True),  # 평균 상승, 4/5 개선
+        ([0.61, 0.61, 0.61, 0.50, 0.50], False),  # 3/5 개선
+        ([0.70, 0.59, 0.59, 0.59, 0.59], False),  # 1/5 개선 (평균은 상승)
+        ([0.601, 0.601, 0.601, 0.601, 0.40], False),  # 4/5 개선이지만 평균 하락
+    ],
+)
+def test_beats_rule(new, expected):
+    assert beats(new, [0.6] * 5) is expected
+
+
+def test_fine_cv_covers_same_period_as_cv5():
+    fine, coarse = cv_splits_fine(N), cv_splits(N)
+    assert len(fine) == 10 and all(len(va) == 50 for _, va in fine)
+    assert fine[0][1][0] == coarse[0][1][0] and fine[-1][1][-1] == coarse[-1][1][-1]

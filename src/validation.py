@@ -26,6 +26,11 @@ def cv_splits(n: int) -> list[Split]:
     return list(TimeSeriesSplit(n_splits=N_SPLITS, test_size=FOLD_SIZE, gap=GAP).split(np.arange(n)))
 
 
+def cv_splits_fine(n: int) -> list[Split]:
+    """50일 × 10회 rolling (gap 3). cv5와 같은 500일을 더 잘게 나눠 작은 개선을 감지한다."""
+    return list(TimeSeriesSplit(n_splits=10, test_size=50, gap=GAP).split(np.arange(n)))
+
+
 def holdout_split(n: int) -> list[Split]:
     """마지막 200일 검증 (Private 길이 모사)."""
     valid = np.arange(n - HOLDOUT_SIZE, n)
@@ -43,6 +48,15 @@ def evaluate(fit_predict: FitPredict, X: pd.DataFrame, y: pd.DataFrame, splits: 
                 raise ValueError(f"{target} fold {fold}: 예측값 형태가 잘못되었거나 유한하지 않습니다.")
             rows.append({"target": target, "fold": fold, "auc": roc_auc_score(y[target].iloc[va], pred)})
     return pd.DataFrame(rows)
+
+
+MIN_FOLD_WINS = 4
+
+
+def beats(new: np.ndarray, old: np.ndarray, min_wins: int = MIN_FOLD_WINS) -> bool:
+    """채택 규칙: fold별 AUC가 평균으로 오르고, min_wins개 이상의 fold에서 오르면 True."""
+    new, old = np.asarray(new), np.asarray(old)
+    return bool(new.mean() > old.mean() and (new > old).sum() >= min_wins)
 
 
 def summarize(scores: pd.DataFrame) -> pd.DataFrame:
