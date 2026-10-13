@@ -18,7 +18,11 @@
 .venv/bin/python -m src.experiments Target_1   # 피처 사다리 (Target_2도 동일)
 .venv/bin/python -m src.experiments final      # features_v1 채점 + 제출 파일
 .venv/bin/python -m src.backlog Target_1        # 후보 백로그 실행 (Target_2도 동일)
-.venv/bin/python -m src.backlog final           # features_v2 채점 + 제출 파일 (현재 최종 제출 경로)
+.venv/bin/python -m src.backlog final           # features_v2 채점 + 제출 파일
+.venv/bin/python -m src.screening Target_1      # 독립 시험 → 합치기 → 최종 확인 (Target_2도 동일)
+.venv/bin/python -m src.screening final         # features_v3 채점 + 제출 파일
+.venv/bin/python -m src.public_plan round 1     # Public 1회차 파일 (2회차도 동일)
+.venv/bin/python -m src.public_plan final 1 2   # 최종 Private: KOSPI 1회차 후보 + 건강식품 2회차 후보 (Public 결과로 선택)
 .venv/bin/python -m src.modeling Target_1      # 모델 비교·조정·앙상블 (Target_2도 동일)
 .venv/bin/python -m src.hypotheses Target_1    # 사전 등록 가설 검증 (Target_2도 동일)
 .venv/bin/python -m pytest -q      # 테스트
@@ -44,6 +48,8 @@
 | `src/hypotheses.py` | 사전 등록 가설 사다리 (덩어리 4.5) |
 | `src/augment.py`, `src/levers.py` | 형제 정답 증강·최근 구간 학습 실험 (덩어리 4.6) |
 | `src/backlog.py` | 사전 등록 후보 실행과 최종 v2 채점·제출 (덩어리 4.7) |
+| `src/screening.py` | 독립 시험·합치기·최종 확인과 최종 v3 채점·제출 (덩어리 4.8) |
+| `src/public_plan.py` | Public 제출 계획: 회차별 파일과 최종 Private 조합 |
 | `notebooks/01_eda.ipynb` | 데이터 이해 (EDA). 그림은 `outputs/figures/` |
 | `tests/` | 분할·피처 누수 방지, 제출 형식, 베이스라인 재현, 통계 함수 테스트 |
 | `docs/EXPERIMENTS.md` | 실험 일지 |

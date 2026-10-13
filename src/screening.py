@@ -8,6 +8,7 @@
 실행:
   python -m src.screening Target_1
   python -m src.screening Target_2
+  python -m src.screening final      # 확정 설정(FINAL_V3)으로 채점 + 제출 파일
 """
 
 import json
@@ -41,7 +42,8 @@ from src.models import (
     on_columns,
     rank_average,
 )
-from src.validation import FitPredict, beats, cv_splits, private_mimic_splits
+from src.submission import build_submission, write_submissions
+from src.validation import FitPredict, beats, cv_splits, evaluate, holdout_split, private_mimic_splits, summarize
 
 EXPERIMENT_DIR = ROOT / "outputs" / "experiments"
 A_TOLERANCE = 0.002
@@ -81,10 +83,10 @@ def null_importance_columns(X_train: pd.DataFrame, y_train: pd.Series, sample_we
     true = _gain(X, y, sample_weight)
     shifts = np.random.default_rng(0).integers(MIN_SHIFT, len(y) - MIN_SHIFT, N_NULL)
     null = np.array([_gain(X, np.roll(y, s), sample_weight) for s in shifts])
-    passed = true > np.percentile(null, NULL_PERCENTILE, axis=0)
-    if passed.sum() < MIN_KEEP:
-        passed = np.zeros(len(keep), dtype=bool)
-        passed[np.argsort(-true)[:MIN_KEEP]] = True
+    margin = true - np.percentile(null, NULL_PERCENTILE, axis=0)
+    passed = margin > 0
+    if passed.sum() < MIN_KEEP:  # 통과한 변수는 모두 두고, 모자란 자리는 기준선에 가장 가까웠던 변수로 채운다
+        passed[np.argsort(-margin)[:MIN_KEEP]] = True
     return list(keep[passed])
 
 
@@ -281,8 +283,46 @@ def run(target: str) -> Config2:
     return final_cfg
 
 
+# 독립 시험 → 합치기 → 최종 확인 결과로 확정한 설정 (docs/EXPERIMENTS.md #13). run_final이 결과 파일과 대조한다.
+FINAL_V3 = {
+    "Target_1": Config2(("us_change", "us_trend_vol"), clip=True, monotone=True, hedge_core=True),
+    "Target_2": Config2(("weekday", "traffic", "weekday_dev"), clip=True, drop_general=True),
+}
+FINAL_RUN = "features_v3"
+PUBLIC_ROUND = 3
+
+
+def run_final() -> None:
+    """FINAL_V3를 cv5·holdout200·pm4로 채점하고, train 전체로 재학습해 제출 파일을 만든다."""
+    for target in TARGETS:
+        recorded = json.loads((EXPERIMENT_DIR / f"screening_{target}.json").read_text())
+        if recorded != json.loads(json.dumps(asdict(FINAL_V3[target]))):
+            raise RuntimeError(f"{target}: FINAL_V3가 최근 screening 결과와 다릅니다. 결과를 확인하고 FINAL_V3를 갱신하세요.")
+    train, test = load_data()
+    for scheme, make_splits in [("cv5", cv_splits), ("holdout200", holdout_split), ("pm4", private_mimic_splits)]:
+        scores = []
+        for target in TARGETS:
+            cfg = FINAL_V3[target]
+            X, _ = build(train, test, list(cfg.families))
+            scores.append(evaluate(make_model2(cfg), X, train[[target]], make_splits(len(X))))
+        scores = pd.concat(scores, ignore_index=True)
+        scores.to_csv(EXPERIMENT_DIR / f"{FINAL_RUN}_{scheme}.csv", index=False)
+        print(f"[{scheme}]\n{summarize(scores).round(4).to_string()}\n")
+
+    preds = {}
+    for target in TARGETS:
+        cfg = FINAL_V3[target]
+        X, X_test = build(train, test, list(cfg.families))
+        preds[target] = make_model2(cfg)(X, train[target], X_test)
+    public_path, private_path = write_submissions(build_submission(test, preds), FINAL_RUN, PUBLIC_ROUND)
+    print(f"[제출 파일] {public_path.relative_to(ROOT)}, {private_path.relative_to(ROOT)}")
+
+
 if __name__ == "__main__":
     command = sys.argv[1] if len(sys.argv) == 2 else ""
-    if command not in TARGETS:
-        sys.exit(f"사용법: python -m src.screening {{{'|'.join(TARGETS)}}}")
-    run(command)
+    if command in TARGETS:
+        run(command)
+    elif command == "final":
+        run_final()
+    else:
+        sys.exit(f"사용법: python -m src.screening {{{'|'.join(TARGETS)}|final}}")

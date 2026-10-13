@@ -45,3 +45,10 @@ def test_pairwise_logistic_ranks_like_signal():
     assert roc_auc_score(y_te, pw) > 0.85
     assert np.corrcoef(pw, make_logistic()(X, y, X_te))[0, 1] > 0.95
     assert ((pw > 0) & (pw < 1)).all()
+
+
+def test_pairwise_uniform_weights_match_unweighted():
+    """가중치가 모두 1이면 정규화 강도가 가중치 없음과 같아야 한다 (검토 지적 2)."""
+    X_te = pd.DataFrame({"a": rng.normal(size=50), "b": rng.normal(size=50)})
+    fp = make_pairwise_logistic()
+    np.testing.assert_allclose(fp(X, y, X_te), fp(X, y, X_te, sample_weight=np.ones(N)), rtol=1e-6)

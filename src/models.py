@@ -110,8 +110,8 @@ def make_lgbm(monotone_increasing: tuple[str, ...] = (), monotone_decreasing: tu
 def make_pairwise_logistic(C: float = LOGISTIC_C, clip: bool = False) -> FitPredict:
     """쌍 비교 로지스틱: (양성 − 음성) 입력 차이로 '어느 날이 더 오를까'를 학습한다 (AUC의 표준 대리 손실).
 
-    정규화 강도는 일반 로지스틱과 같도록 C에 (표본 수 / 쌍 수)를 곱한다.
-    sample_weight가 있으면 쌍의 가중치는 두 날 가중치의 곱이다.
+    정규화 강도는 일반 로지스틱과 같도록 C에 (표본 가중치 합 / 쌍 가중치 합)을 곱한다
+    (가중치가 없으면 표본 수 / 쌍 수). sample_weight가 있으면 쌍의 가중치는 두 날 가중치의 곱이다.
     """
 
     def fit_predict(X_train: pd.DataFrame, y_train: pd.Series, X_pred: pd.DataFrame, sample_weight=None) -> np.ndarray:
@@ -123,12 +123,12 @@ def make_pairwise_logistic(C: float = LOGISTIC_C, clip: bool = False) -> FitPred
         diffs = (pos[:, None, :] - neg[None, :, :]).reshape(-1, Z.shape[1])
         X_pairs = np.vstack([diffs, -diffs])
         y_pairs = np.r_[np.ones(len(diffs)), np.zeros(len(diffs))]
-        w_pairs = None
-        if sample_weight is not None:
-            w = np.asarray(sample_weight, dtype=float)
-            w_pairs = np.tile(np.outer(w[y == 1], w[y == 0]).ravel(), 2)
-        C_pair = C * len(Z) / len(X_pairs)
-        model = LogisticRegression(C=C_pair, fit_intercept=False, max_iter=5000).fit(X_pairs, y_pairs, sample_weight=w_pairs)
+        w = np.ones(len(Z)) if sample_weight is None else np.asarray(sample_weight, dtype=float)
+        w_pairs = np.tile(np.outer(w[y == 1], w[y == 0]).ravel(), 2)
+        C_pair = C * w.sum() / w_pairs.sum()
+        model = LogisticRegression(C=C_pair, fit_intercept=False, max_iter=5000).fit(
+            X_pairs, y_pairs, sample_weight=None if sample_weight is None else w_pairs
+        )
         X_in = X_pred[keep]
         if clip:
             X_in = X_in.clip(lower=X_train[keep].min(), upper=X_train[keep].max(), axis=1)
